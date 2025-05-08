@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
     // Post-process with GPT-4 for medical terminology enhancement
     const gptResponse = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "system",

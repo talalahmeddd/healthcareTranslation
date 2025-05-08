@@ -8,6 +8,9 @@ import { toast } from 'sonner';
 interface VoiceInputProps {
   onTranscriptionComplete: (text: string) => void;
   isProcessing?: boolean;
+  sourceLanguage: string;
+  onRecordingStart: () => void;
+  onTranscriptUpdate?: (final: string, interim: string) => void;
 }
 
 // Add type definitions for Web Speech API
@@ -57,7 +60,13 @@ declare global {
   }
 }
 
-export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: VoiceInputProps) {
+export function VoiceInput({ 
+  onTranscriptionComplete, 
+  isProcessing = false, 
+  sourceLanguage,
+  onRecordingStart,
+  onTranscriptUpdate
+}: VoiceInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -68,6 +77,7 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
   const finalTranscriptRef = useRef('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const translationTimeoutRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
     return () => {
@@ -80,8 +90,56 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
       }
+      if (translationTimeoutRef.current) {
+        clearTimeout(translationTimeoutRef.current);
+      }
     };
   }, []);
+
+  const translateToSourceLanguage = async (text: string) => {
+    if (!text.trim()) {
+      return text;
+    }
+
+    try {
+      const response = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          sourceLanguage: 'English',
+          targetLanguage: sourceLanguage,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Translation failed');
+      }
+
+      const data = await response.json();
+      return data.translatedText;
+    } catch (error) {
+      console.error('Translation error:', error);
+      return text;
+    }
+  };
+
+  const debouncedTranslate = (text: string) => {
+    if (!text.trim()) {
+      return;
+    }
+
+    if (translationTimeoutRef.current) {
+      clearTimeout(translationTimeoutRef.current);
+    }
+
+    translationTimeoutRef.current = setTimeout(async () => {
+      const translatedText = await translateToSourceLanguage(text);
+      onTranscriptionComplete(translatedText);
+    }, 300);
+  };
 
   const startRecording = async () => {
     try {
@@ -91,15 +149,12 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
       finalTranscriptRef.current = '';
       audioChunksRef.current = [];
 
-      // Check if browser supports Web Speech API
       if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         throw new Error('Speech recognition is not supported in this browser');
       }
 
-      // Get audio stream
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Initialize MediaRecorder
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       
@@ -109,7 +164,6 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
         }
       };
 
-      // Initialize speech recognition
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       const recognition = new SpeechRecognition();
       recognitionRef.current = recognition;
@@ -122,15 +176,13 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
         setIsRecording(true);
         setIsInitializing(false);
         setRecordingTime(0);
+        onRecordingStart();
         
-        // Start recording timer
         timerRef.current = setInterval(() => {
           setRecordingTime(prev => prev + 1);
         }, 1000);
         
-        // Start media recorder
         mediaRecorder.start();
-        
         toast.success('Recording started');
       };
 
@@ -150,8 +202,16 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
         if (final) {
           finalTranscriptRef.current += final;
           setFinalTranscript(finalTranscriptRef.current);
+          debouncedTranslate(finalTranscriptRef.current);
         }
+        
         setInterimTranscript(interim);
+        if (interim) {
+          debouncedTranslate(finalTranscriptRef.current + interim);
+        }
+
+        // Notify parent component of transcript updates
+        onTranscriptUpdate?.(finalTranscriptRef.current, interim);
       };
 
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -162,15 +222,12 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
 
       recognition.onend = () => {
         if (isRecording) {
-          // If we're still supposed to be recording, restart
           recognition.start();
         } else {
-          // If we're done recording, process the audio
           if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
           }
           
-          // Stop all tracks in the stream
           stream.getTracks().forEach(track => track.stop());
           
           if (timerRef.current) {
@@ -194,7 +251,10 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
       recognitionRef.current.stop();
       toast.info('Processing audio...');
 
-      // Wait for the media recorder to finish
+      if (translationTimeoutRef.current) {
+        clearTimeout(translationTimeoutRef.current);
+      }
+
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         await new Promise<void>((resolve) => {
           mediaRecorderRef.current!.onstop = () => resolve();
@@ -202,7 +262,6 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
         });
       }
 
-      // Create audio blob and send to OpenAI
       const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
       const formData = new FormData();
       formData.append('audio', audioBlob);
@@ -219,14 +278,15 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
 
         const data = await response.json();
         if (data.text) {
+          // Send the transcribed text directly without translation
           onTranscriptionComplete(data.text);
         }
       } catch (error) {
         console.error('Error processing audio:', error);
         toast.error('Failed to process audio');
-        // Fallback to Web Speech API transcription
         const completeTranscript = finalTranscriptRef.current.trim();
         if (completeTranscript) {
+          // Send the final transcript directly without translation
           onTranscriptionComplete(completeTranscript);
         }
       }
@@ -258,7 +318,7 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
       </Button>
       <div className="flex flex-col items-center">
         <span className="text-sm text-muted-foreground">
-          {isRecording ? 'Recording...' : 'Click to start recording'}
+          {isRecording ? 'Stop' : 'Click to Speak'}
         </span>
         {isRecording && (
           <span className="text-sm font-medium text-destructive">
@@ -266,15 +326,6 @@ export function VoiceInput({ onTranscriptionComplete, isProcessing = false }: Vo
           </span>
         )}
       </div>
-      {(interimTranscript || finalTranscript) && (
-        <div className="mt-4 w-full max-w-md rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">Live Transcription:</p>
-          <p className="mt-1 text-sm">{finalTranscript}</p>
-          {interimTranscript && (
-            <p className="mt-1 text-sm text-muted-foreground">{interimTranscript}</p>
-          )}
-        </div>
-      )}
     </div>
   );
 } 
