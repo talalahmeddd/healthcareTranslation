@@ -5,8 +5,8 @@ A real-time healthcare translation application that helps break down language ba
 ## Features
 
 - 🎙️ Voice-to-Text Transcription with medical terminology optimization
-- 🌐 Real-time translation using OpenAI GPT-4 Turbo
-- 🔊 Text-to-Speech playback in multiple languages
+- 🌐 Real-time translation using OpenAI 
+- 🔊 Text-to-Speech playback using OpenAI's TTS API
 - 📱 Mobile-first responsive design
 - 🔒 Basic data encryption with no transcript storage
 
@@ -15,8 +15,8 @@ A real-time healthcare translation application that helps break down language ba
 - **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS
 - **UI Components**: shadcn/ui
 - **Speech Processing**: Web Speech API
-- **Translation**: OpenAI GPT-4 Turbo API
-- **Text-to-Speech**: Speech Synthesis API
+- **Translation**: OpenAI GPT-4o
+- **Text-to-Speech**: OpenAI TTS API
 - **Deployment**: Vercel
 
 ## Getting Started
@@ -24,7 +24,6 @@ A real-time healthcare translation application that helps break down language ba
 1. Clone the repository:
    ```bash
    git clone https://github.com/yourusername/healthcare-translation.git
-   cd healthcare-translation
    ```
 
 2. Install dependencies:
@@ -44,6 +43,23 @@ A real-time healthcare translation application that helps break down language ba
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## Usage
+
+1. **Voice Recording**:
+   - Click the microphone button to start recording
+   - Speak clearly in your preferred language
+   - Click again to stop recording
+
+2. **Translation**:
+   - Select your source language (the language you're speaking in)
+   - Select your target language (the language you want to translate to)
+   - The translation will appear automatically
+
+3. **Text-to-Speech**:
+   - After translation is complete, click the "Play Translation" button
+   - The translated text will be converted to speech and played back
+   - The audio is generated on-demand using OpenAI's TTS API
+
 ## Security Considerations
 
 - No transcripts or translations are stored permanently
@@ -56,6 +72,9 @@ A real-time healthcare translation application that helps break down language ba
 ```
 src/
 ├── app/                 # Next.js App Router
+│   ├── api/            # API routes
+│   │   ├── translate/  # Translation endpoint
+│   │   └── text-to-speech/ # Text-to-speech endpoint
 ├── components/          # Reusable UI components
 ├── lib/                 # Utility functions and hooks
 ├── styles/             # Global styles

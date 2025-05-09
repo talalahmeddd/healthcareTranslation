@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { Volume2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { VoiceInput } from "./VoiceInput"
@@ -14,6 +14,8 @@ export default function VoiceTranslator() {
   const [isRecording, setIsRecording] = useState(false)
   const [interimTranscript, setInterimTranscript] = useState("")
   const [finalTranscript, setFinalTranscript] = useState("")
+  const [isPlaying, setIsPlaying] = useState(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const translateText = useCallback(async (text: string) => {
     if (!text.trim() || isRecording) return;
@@ -69,10 +71,49 @@ export default function VoiceTranslator() {
     setInterimTranscript(interim);
   }, []);
 
-  const handlePlayAudio = () => {
-    toast.info("Playing audio...")
-    // Audio playback logic would go here
-  }
+  const handlePlayTranslation = useCallback(async () => {
+    if (!translatedText || isPlaying) return;
+
+    try {
+      setIsPlaying(true);
+      const response = await fetch('/api/text-to-speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: translatedText,
+          voice: 'alloy', // You can make this configurable if needed
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to convert text to speech');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.play();
+      }
+    } catch (error) {
+      console.error('Text-to-speech error:', error);
+      toast.error('Failed to play translation');
+    } finally {
+      setIsPlaying(false);
+    }
+  }, [translatedText, isPlaying]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+    };
+  }, []);
 
   return (
     <div className="medical-card w-full px-4 sm:px-6 lg:px-8">
@@ -117,6 +158,20 @@ export default function VoiceTranslator() {
                 {isTranslating && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
               </div>
               <p className="text-lg sm:text-xl font-medium text-foreground">{translatedText}</p>
+              {translatedText && (
+                <button
+                  onClick={handlePlayTranslation}
+                  disabled={isPlaying}
+                  className="mt-2 inline-flex items-center px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isPlaying ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Volume2 className="mr-2 h-4 w-4" />
+                  )}
+                  {isPlaying ? 'Playing...' : 'Play Translation'}
+                </button>
+              )}
             </div>
 
             <div className="mb-8 grid w-full grid-cols-1 sm:grid-cols-2 gap-4">
@@ -154,14 +209,10 @@ export default function VoiceTranslator() {
                 </select>
               </div>
             </div>
-
-            <button onClick={handlePlayAudio} className="play-button flex items-center justify-center w-full sm:w-auto">
-              <Volume2 className="mr-2 h-6 w-6" />
-              Play Translation
-            </button>
           </div>
         </div>
       </div>
+      <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
     </div>
   )
 }
